@@ -1,0 +1,9 @@
+test
+*.test.js
+*.spec.js
+vitest.config.js
+*.log
+*.env
+node_modules
+test/
+vitest.config.js

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "TestAPI",
+    "description": "API Responses demo",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "test": {
+          "type": "string"
+        }
+      }
+    }
+  }
+]
