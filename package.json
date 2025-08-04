@@ -1,7 +1,10 @@
 {
   "type": "module",
+  "bin": {
+    "sim-mcp": "./cli.ts"
+  },
   "name": "sim-mcp",
-  "version": "2.0.7",
+  "version": "3.0.0",
   "main": "sim-mcp.js",
   "scripts": {
     "test": "vitest"
@@ -10,17 +13,12 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.15.1",
     "@openai/agents": "^0.0.11",
-    "chalk": "^5.4.1",
-    "chokidar": "^4.0.3",
     "dotenv": "^17.2.0",
-    "express": "^5.1.0",
-    "node-fetch": "^3.3.2",
     "openai": "^5.10.2",
     "path": "^0.12.7",
-    "uuid": "^11.1.0",
-    "zod": "^3.25.67"
+    "typescript": "^5.9.2",
+    "typescript-json-schema": "^0.65.1"
   },
   "devDependencies": {
     "vitest": "^3.2.4"
