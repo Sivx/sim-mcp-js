@@ -9,82 +9,136 @@ Minimal, MCP-compliant framework for LLM tools, scripting, and automation.
 ```sh
 npm install sim-mcp
 npm install -D typescript tsx
-npm install -g @modelcontextprotocol/inspector   # (Optional) Test MCP stdio tools
+npm install -g @modelcontextprotocol/inspector   # (Optional) For MCP stdio testing
 ```
 
 ---
 
 ## Usage
 
-### Example: Tools Composing with the Assistant
-
 ```ts
 import { toolsJson, ChatAssistant, isMCP } from "sim-mcp";
 
+/** Input for weather info for a city */
 export interface WeatherInput {
+  /** Name of the city */
   name: string;
 }
+
+/**
+ * Get weather info for a city.
+ * @param wi Weather input
+ * @returns Weather description string
+ */
 export async function Weather(wi: WeatherInput) {
-  // Use the assistant from inside your tool
-  const bot = new ChatAssistant();
-  const fact = await bot.solo(`Give a quick fun fact about ${wi.name}.`);
-  return `The weather in ${wi.name} is sunny with 75°F. Fun fact: ${fact.text}`;
+  return `The weather in ${wi.name} is sunny with 75°F.`;
 }
 
-const tools = toolsJson([Weather]);
+/** Input for greeting */
+export interface GreetInput {
+  /** Name of the person to greet */
+  name: string;
+}
+
+/**
+ * Return a friendly greeting for a user.
+ * @param gi Greeting input
+ * @returns Greeting string
+ */
+export function Greet(gi: GreetInput) {
+  return `Hello, ${gi.name}!`;
+}
+
+/** No input for random city generation */
+export interface RandomCityInput {}
+
+/**
+ * Generate a random city name using the LLM.
+ * @returns City name string
+ */
+export async function RandomCity(_: RandomCityInput) {
+  const bot = new ChatAssistant();
+  const res = await bot.solo("Suggest a random city name.");
+  return res.text || "Unknown City";
+}
+
+const allTools = toolsJson([Weather, Greet, RandomCity]);
+const greetTool = toolsJson([Greet]);
 
 if (!isMCP()) {
   (async () => {
     const bot = new ChatAssistant({
-      instructions: "Concise weather info.",
-      tools,
+      instructions: "Concise and helpful.",
+      tools: allTools,
     });
+
+    // PROMPT: User-driven Q&A loop
     let res;
     do {
-      res = await bot.prompt("City? ('exit' to quit)");
+      res = await bot.prompt("Ask about weather, greeting, or type 'exit':");
       if (res.text) console.log("Assistant:", res.text);
     } while (res.type !== "exit");
+
+    // CHAINING: Use RandomCity, then Weather
+    const city = await bot.decide("Pick a random city.");
+    if (city.error || !city.result) {
+      console.log("Error getting random city.");
+      return;
+    }
+    const weather = await bot.decide(`What's the weather in ${city.result}?`);
+    if (weather.error) {
+      console.log("Error getting weather.");
+      return;
+    }
+    console.log(`Random city: ${city.result}\nWeather: ${weather.text}`);
+
+    // DISCUSS: LLM-only chat (no tools)
+    const chatRes = await bot.discuss(
+      "Tell me something interesting about the world's capitals."
+    );
+    console.log("Discuss:", chatRes.text);
+
+    // DECIDE with custom tool set: only greet
+    const greetRes = await bot.decide("Say hello to Alex.", {
+      tools: greetTool,
+    });
+    console.log("Decide (greet only):", greetRes.text);
   })();
 }
 ```
 
 ---
 
-### Advanced Flows: decide, discuss, solo
+## Assistant Methods
 
-```ts
-import { toolsJson, ChatAssistant } from "sim-mcp";
+| Method    | Use Case                                    | Tool Calls | User Input | LLM Only | Description                                                      |
+| --------- | ------------------------------------------- | ---------- | ---------- | -------- | ---------------------------------------------------------------- |
+| `prompt`  | Interactive Q&A / user-driven chat          | Yes        | Yes        | Yes      | User types questions, assistant responds (with or without tools) |
+| `decide`  | Force tool call (function-call only)        | Yes        | No         | No       | LLM _must_ use a tool to answer the prompt                       |
+| `chat`    | General purpose (tool or text, LLM decides) | Optional   | No         | Yes      | LLM answers freely or calls a tool if it decides to              |
+| `solo`    | One-shot, LLM-only response (no tools used) | No         | No         | Yes      | Always a single LLM text reply, no function-calling              |
+| `discuss` | Chat/discussion mode (no tools allowed)     | No         | No         | Yes      | Conversation, summaries, or info without tool invocation         |
 
-function Calculator({ x, y }: { x: number; y: number }) {
-  return `${x} + ${y} = ${x + y}`;
-}
-const tools = toolsJson([Calculator]);
-const bot = new ChatAssistant({
-  instructions: "Calculator. Use the tool to solve math.",
-  tools,
-});
+- All methods accept options such as `{ model, instructions, tools }`.
 
-// Require LLM to use a tool
-bot.decide("What is 3 + 7?").then((res) => {
-  console.log("decide:", res.result);
-});
+---
 
-// Let LLM decide to use a tool or not
-bot.discuss("Tell me a math fact or calculate 8+2.").then((res) => {
-  console.log("discuss:", res.text);
-});
+## API
 
-// Just chat, no tools
-bot.solo("Say hi.").then((res) => {
-  console.log("solo:", res.text);
-});
-```
+- `toolsJson(tools: Function[])`
+- `ChatAssistant({ model?, instructions?, tools? })`
+  - `.prompt(message, options?)`
+  - `.decide(message, options?)`
+  - `.chat(message, options?)`
+  - `.solo(message, options?)`
+  - `.discuss(message, options?)`
+- `isMCP()`
+
+_Default export_: `{ toolsJson, ChatAssistant, isMCP }`
 
 ---
 
 ## MCP Tool Testing
-
-Test your tool via MCP stdio:
 
 ```sh
 npx @modelcontextprotocol/inspector tsx yourfile.ts
@@ -94,23 +148,8 @@ npx @modelcontextprotocol/inspector tsx yourfile.ts
 
 ## Environment
 
-- Use `.env` at project root for `OPENAI_API_KEY` and other vars.
+- Use `.env` at project root for `OPENAI_API_KEY` and other variables.
 - `.env` is auto-loaded.
-
----
-
-## API
-
-- `toolsJson(tools: Function[])`
-- `ChatAssistant({ model?, instructions?, tools? })`
-  - `.chat(prompt, opts?)`
-  - `.prompt(msg, opts?)`
-  - `.decide(prompt, opts?)`
-  - `.discuss(prompt, opts?)`
-  - `.solo(prompt, opts?)`
-- `isMCP()`
-
-_Default export_: `{ toolsJson, ChatAssistant, isMCP }`
 
 ---
 
