@@ -9,5 +9,9 @@ function isMCP() {
   return !process.stdin.isTTY || !process.stdout.isTTY;
 }
 
-export { toolsJson, ChatAssistant, isMCP };
-export default { toolsJson, ChatAssistant, isMCP };
+function isCli() {
+  return !isMCP();
+}
+
+export { toolsJson, ChatAssistant, isMCP, isCli };
+export default { toolsJson, ChatAssistant, isMCP, isCli };

@@ -1,5 +1,7 @@
 import { OpenAI } from "openai";
 import readline from "readline";
+import { AgenticChain } from "./AgenticChain.js";
+import { toolsJson } from "./inline-tools.js";
 export class ChatAssistant {
   /**
    * @param {Object} [options]
@@ -11,6 +13,7 @@ export class ChatAssistant {
     this.client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     this.model = model.trim();
     this.inst = instructions;
+    tools = toolsJson(tools);
     this.tools = tools.map(({ fn, ...r }) => {
       if (!r.name || !r.type) throw Error("tool");
       return { ...r, fn };
@@ -22,14 +25,38 @@ export class ChatAssistant {
   }
   async chat(prompt, options = {}) {
     const { tools, force, instructions, oneOff } = options;
-    const t = (tools && tools.length ? tools : this.tools).map(
-      ({ fn, ...r }) => r
-    );
+
+    const t = (tools && tools.length ? tools : this.tools).map((tool) => {
+      if (tool.name && tool.inputSchema) {
+        //tool.inputSchema.parameters.additionalProperties = false; // Ensure no additional properties
+        // Old schema to new
+        let tmp = {
+          type: "function",
+          name: tool.name,
+          description: tool.description || "",
+          parameters: {
+            ...tool.inputSchema,
+            required: tool.inputSchema.required || [],
+            //additionalProperties: false,
+          },
+        };
+        return tmp;
+      }
+      return { ...tool };
+    });
+
+    //const t = tools && tools.length ? tools : this.tools;
+
     const tf = tools && tools.length ? tools : this.tools;
     const tc = force === true ? "required" : force === false ? "none" : "auto";
     const params = {
       model: this.model,
-      input: prompt,
+      input: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
       tools: t,
       instructions: instructions ?? this.inst,
       tool_choice: tc,
@@ -45,8 +72,13 @@ export class ChatAssistant {
     let res, err, args;
     try {
       args = fc.arguments ? JSON.parse(fc.arguments) : {};
+      // Find tool by function.name (new schema)
       const tool = tf.find(
-        (x) => x.name === fc.name && typeof x.fn === "function"
+        (x) =>
+          (x.function &&
+            x.function.name === fc.name &&
+            typeof x.fn === "function") ||
+          (x.name === fc.name && typeof x.fn === "function")
       );
       if (!tool) throw new Error("Tool not found");
       res = await tool.fn(args);
@@ -83,6 +115,7 @@ export class ChatAssistant {
       error: err,
     };
   }
+
   prompt(message = null, options = {}) {
     return new Promise((resolve) => {
       const rl = readline.createInterface({
@@ -117,5 +150,8 @@ export class ChatAssistant {
       force: false,
       oneOff: true,
     });
+  }
+  chain() {
+    return new AgenticChain(this);
   }
 }

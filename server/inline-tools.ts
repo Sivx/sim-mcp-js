@@ -8,7 +8,7 @@ const getCallerFile = () => {
   for (const l of stack) {
     const m = l.match(/\((.*):\d+:\d+\)/) || l.match(/at (.*):\d+:\d+/);
     const f = m && m[1];
-    if (f && f !== thisFile) return f;
+    if (f && f !== thisFile && !f.endsWith("/server/assistant.js")) return f;
   }
   throw new Error("Could not determine caller file");
 };
