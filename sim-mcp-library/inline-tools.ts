@@ -73,7 +73,16 @@ export const toolsJson = (fns) => {
     flattenSingleObjectParam: true,
   });
 
-  const importSpecs = [...new Set([...imports.values()].map((i) => i.spec))];
+  const ignorePatterns = ["../sim-mcp.js", "./inline-tools.js"];
+
+  const importSpecs = [
+    ...new Set(
+      [...imports.values()]
+        .map((i) => i.spec)
+        .filter((spec) => !ignorePatterns.some((p) => spec.includes(p)))
+    ),
+  ];
+  //console.log(importSpecs);
   const importedSchemas = importSpecs.flatMap((spec) =>
     extractToolsJson(readSrc(spec), { flattenSingleObjectParam: true }).map(
       (s) => ({ ...s, __spec: spec })
@@ -91,10 +100,13 @@ export const toolsJson = (fns) => {
       .map((f) => [f.name, f])
   );
 
-  const byName = new Map();
+  let byName = new Map();
   for (const s of allSchemas) if (!byName.has(s.name)) byName.set(s.name, s);
 
-  return [...byName.values()]
+  //filter out the bynames that arent in the fns array
+  byName = new Map([...byName.entries()].filter(([name]) => fnMap.has(name)));
+
+  let result = [...byName.values()]
     .map((s) => {
       let fn = fnMap.get(s.name);
       if (!fn) {
@@ -109,12 +121,13 @@ export const toolsJson = (fns) => {
             fn = inv[1].kind === "default" ? mod.default : mod[inv[1].imported];
           if (!fn) fn = mod[s.name];
         } else {
-          const selfMod = requireFn(pathToFileURL(callerFile).toString());
-          fn = selfMod[s.name];
+          //const selfMod = requireFn(pathToFileURL(callerFile).toString());
+          //fn = selfMod[s.name];
         }
       }
       return { ...s, fn };
     })
     .filter((x) => typeof x.fn === "function")
     .map(({ __spec, ...rest }) => rest);
+  return result;
 };

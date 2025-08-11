@@ -9,7 +9,11 @@ function isMCP() {
   return !process.stdin.isTTY || !process.stdout.isTTY;
 }
 
+let firstRun = true;
 function isCli() {
+  if (firstRun) {
+    firstRun = false;
+  }
   return !isMCP();
 }
 
