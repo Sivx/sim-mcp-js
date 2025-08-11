@@ -1,9 +1,9 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-import "./server/stdio.js";
-import { toolsJson } from "./server/inline-tools.js";
-import { ChatAssistant } from "./server/assistant.js";
+import "./sim-mcp-library/stdio.js";
+import { toolsJson } from "./sim-mcp-library/inline-tools.js";
+import { ChatAssistant } from "./sim-mcp-library/assistant.js";
 
 function isMCP() {
   return !process.stdin.isTTY || !process.stdout.isTTY;

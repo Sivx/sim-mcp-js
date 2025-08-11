@@ -10,5 +10,5 @@
     "allowJs": true,
     "noImplicitAny": false
   },
-  "include": ["*.ts", "server/extractToolsJson.ts", "servers/types.ts"]
+  "include": ["*.ts", "sim-mcp-library/extractToolsJson.ts", "servers/types.ts"]
 }
