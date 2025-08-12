@@ -82,7 +82,7 @@ export class ChatAssistant {
   /**
    * @param {{ model?: string; instructions?: string; tools?: TTool[] }} [opts]
    */
-  constructor({ model = "gpt-4.1-mini", instructions = "", tools } = {}) {
+  constructor({ model = "gpt-5-mini", instructions = "", tools } = {}) {
     this.client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     this.model = String(model).trim();
     this.inst = instructions;
@@ -96,6 +96,7 @@ export class ChatAssistant {
     this.prev = null;
   }
 
+  /*
   fork() {
     const a = new ChatAssistant({
       model: this.model,
@@ -104,7 +105,7 @@ export class ChatAssistant {
     });
     a.client = this.client;
     return a;
-  }
+  }*/
 
   clear() {
     this.prev = null;
@@ -273,8 +274,27 @@ export class ChatAssistant {
     });
   }
 
-  chain() {
-    return new AgenticChain(this);
+  fork(overrides = {}) {
+    const a = new ChatAssistant({
+      model: overrides.model ?? this.model,
+      instructions: overrides.instructions ?? this.inst,
+      tools: overrides.tools
+        ? toolsJson(overrides.tools)
+        : this.tools.map((t) => ({ ...t })),
+    });
+    a.client = this.client;
+    return a;
+  }
+
+  chain(opts = {}) {
+    const { fork = true, ...overrides } = opts;
+    const base = fork ? this.fork(overrides) : this;
+    if (!fork && Object.keys(overrides).length) {
+      if (overrides.model) base.model = overrides.model;
+      if (overrides.instructions) base.inst = overrides.instructions;
+      if (overrides.tools) base.tools = toolsJson(overrides.tools);
+    }
+    return new AgenticChain(base);
   }
 
   addTools(fns = []) {

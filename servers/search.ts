@@ -175,8 +175,7 @@ export async function ParallelWebSearch(
   return out.slice(0, n);
 }
 
-let enable_cli = false;
-if (enable_cli && isCli()) {
+if (isCli()) {
   (async () => {
     const bot = new ChatAssistant({
       instructions:
