@@ -14,6 +14,20 @@ function extractEnumValues(node: ts.EnumDeclaration) {
   );
 }
 
+function inferSchemaFromInitializer(init?: ts.Expression): any {
+  if (!init) return { type: "string" };
+  if (ts.isStringLiteral(init)) return { type: "string" };
+  if (ts.isNumericLiteral(init)) return { type: "number" };
+  if (
+    init.kind === ts.SyntaxKind.TrueKeyword ||
+    init.kind === ts.SyntaxKind.FalseKeyword
+  )
+    return { type: "boolean" };
+  if (ts.isArrayLiteralExpression(init)) return { type: "array", items: {} };
+  if (ts.isObjectLiteralExpression(init)) return { type: "object" };
+  return { type: "string" };
+}
+
 export function extractToolsJson(
   source: string,
   opts: { flattenSingleObjectParam?: boolean } = {}
@@ -192,6 +206,8 @@ export function extractToolsJson(
         else if (param.type.kind === ts.SyntaxKind.BooleanKeyword)
           sch = { type: "boolean" };
         else sch = { type: "string" };
+      } else {
+        sch = inferSchemaFromInitializer(param.initializer);
       }
       if (param.initializer) {
         r = false;
@@ -214,8 +230,6 @@ export function extractToolsJson(
     if (req.length) obj.required = req;
     return obj;
   }
-
-  // MCP V2: always output inputSchema as an object, flatten when option enabled
   ts.forEachChild(sf, (n) => {
     if (
       ts.isFunctionDeclaration(n) &&
@@ -224,11 +238,13 @@ export function extractToolsJson(
       const name = n.name?.text || "";
       const desc = getJSDoc(n);
       let inputSchema: any = { type: "object", properties: {} };
+      let positional = false;
+
       if (n.parameters.length > 1) {
         inputSchema = buildGroupedParamsSchema(n.parameters);
+        positional = true;
       } else if (n.parameters.length === 1) {
         const param = n.parameters[0];
-        // FLATTEN if enabled and param is named 'input' and objecty
         if (
           opts.flattenSingleObjectParam &&
           param.type &&
@@ -244,48 +260,58 @@ export function extractToolsJson(
             flatSchema = getNamedSchema(param.type.typeName.getText());
           }
           inputSchema = flatSchema;
+          positional = false;
         } else {
           let propSchema: any = {};
+          let def: any = undefined,
+            reqFlag: boolean;
           if (param.type && ts.isTypeLiteralNode(param.type)) {
             propSchema = buildObjSchema(param.type);
           } else if (param.type && ts.isTypeReferenceNode(param.type)) {
             propSchema = getNamedSchema(param.type.typeName.getText());
           } else if (param.type) {
-            let def: any = undefined,
-              req: boolean;
-            if (param.initializer) {
-              req = false;
-              if (ts.isStringLiteral(param.initializer))
-                def = param.initializer.text;
-              else if (ts.isNumericLiteral(param.initializer))
-                def = Number(param.initializer.text);
-              else if (param.initializer.kind === ts.SyntaxKind.TrueKeyword)
-                def = true;
-              else if (param.initializer.kind === ts.SyntaxKind.FalseKeyword)
-                def = false;
-            } else {
-              req = !param.questionToken;
-            }
             if (param.type.kind === ts.SyntaxKind.StringKeyword)
               propSchema = { type: "string" };
             else if (param.type.kind === ts.SyntaxKind.NumberKeyword)
               propSchema = { type: "number" };
             else if (param.type.kind === ts.SyntaxKind.BooleanKeyword)
               propSchema = { type: "boolean" };
-            if (def !== undefined) propSchema.default = def;
-            if (getJSDoc(param)) propSchema.description = getJSDoc(param);
-            inputSchema.required = req ? [param.name.getText()] : [];
+          } else {
+            propSchema = inferSchemaFromInitializer(param.initializer);
           }
+          if (param.initializer) {
+            reqFlag = false;
+            if (ts.isStringLiteral(param.initializer))
+              def = param.initializer.text;
+            else if (ts.isNumericLiteral(param.initializer))
+              def = Number(param.initializer.text);
+            else if (param.initializer.kind === ts.SyntaxKind.TrueKeyword)
+              def = true;
+            else if (param.initializer.kind === ts.SyntaxKind.FalseKeyword)
+              def = false;
+          } else {
+            reqFlag = !param.questionToken;
+          }
+          if (def !== undefined) propSchema.default = def;
+          if (getJSDoc(param)) propSchema.description = getJSDoc(param);
           inputSchema = {
             type: "object",
             properties: { [param.name.getText()]: propSchema },
           };
-          if (!inputSchema.required && !param.questionToken)
-            inputSchema.required = [param.name.getText()];
+          if (reqFlag) inputSchema.required = [param.name.getText()];
+          positional = true; // single non-object param still positional
         }
       }
-      tools.push({ name, type: "function", description: desc, inputSchema });
+
+      tools.push({
+        name,
+        type: "function",
+        description: desc,
+        inputSchema,
+        positional,
+      });
     }
   });
+
   return tools;
 }

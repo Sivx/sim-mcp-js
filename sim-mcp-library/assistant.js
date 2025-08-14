@@ -120,52 +120,68 @@ export class ChatAssistant {
     if (store) this.prev = r.id;
     return r;
   }
-
-  async #handle(resp, specs, instructions, store = true) {
-    const fc = (resp.output || []).find((i) => i.type === "function_call");
-    if (!fc) return { type: "text", text: resp.output_text, error: null };
-
-    let result, error, args;
-    try {
-      args = fc.arguments ? JSON.parse(fc.arguments) : {};
-      const t = specs.find(
-        (x) =>
-          ((x.function && x.function.name === fc.name) || x.name === fc.name) &&
-          typeof x.fn === "function"
+  async #handle(
+    resp,
+    specs,
+    instructions,
+    store = true,
+    parallelToolCalls = true
+  ) {
+    let finalText = resp.output_text;
+    const calls = [];
+    while (true) {
+      const fcs = (resp.output || []).filter((i) => i.type === "function_call");
+      if (!fcs.length) break;
+      const run = async (fc) => {
+        let result, error, args;
+        try {
+          args = fc.arguments ? JSON.parse(fc.arguments) : {};
+          const t = specs.find((x) => x.name === fc.name);
+          if (!t || typeof t.fn !== "function") throw Error("Tool not found");
+          if (t.positional) {
+            const arr = Array.isArray(args)
+              ? args
+              : args && typeof args === "object"
+              ? t.paramOrder
+                ? t.paramOrder.map((k) => args[k])
+                : Object.values(args)
+              : [];
+            result = await t.fn(...arr);
+          } else result = await t.fn(args);
+          if (typeof result === "undefined")
+            throw Error("Tool returned undefined");
+        } catch (e) {
+          error = { tool: fc?.name, message: e?.message || String(e) };
+        }
+        calls.push({ name: fc.name, args: args || {}, result, error });
+        return {
+          type: "function_call_output",
+          call_id: fc.call_id,
+          output: JSON.stringify(result ?? ""),
+        };
+      };
+      const outputs = parallelToolCalls
+        ? await Promise.all(fcs.map(run))
+        : await (async () => {
+            const out = [];
+            for (const fc of fcs) out.push(await run(fc));
+            return out;
+          })();
+      resp = await this.#call(
+        {
+          model: this.model,
+          input: outputs,
+          tools: toSchema(specs),
+          instructions,
+          tool_choice: "auto",
+          parallel_tool_calls: !!parallelToolCalls,
+        },
+        store
       );
-      if (!t) throw Error("Tool not found");
-      result = await t.fn(args);
-    } catch (e) {
-      error = { tool: fc?.name, message: e?.message || String(e) };
+      finalText = resp.output_text ?? finalText;
     }
-    if (!error && result === undefined)
-      error = { tool: fc?.name, message: "Tool returned undefined" };
-
-    const follow = await this.#call(
-      {
-        model: this.model,
-        input: [
-          {
-            type: "function_call_output",
-            call_id: fc.call_id,
-            output: JSON.stringify(result ?? ""),
-          },
-        ],
-        tools: toSchema(specs),
-        instructions,
-        tool_choice: "auto",
-      },
-      store
-    );
-
-    return {
-      type: "tool",
-      name: fc.name,
-      args: args || {},
-      result,
-      text: follow.output_text,
-      error,
-    };
+    if (!calls.length) return { type: "text", text: finalText, error: null };
+    return { type: "tools", calls, text: finalText, error: null };
   }
 
   #prepareTools(tools) {
@@ -183,8 +199,10 @@ export class ChatAssistant {
     });
     return { list: withSlugs, nameMap };
   }
-
-  async #invoke(prompt, { tools, instructions, toolChoice, oneOff }) {
+  async #invoke(
+    prompt,
+    { tools, instructions, toolChoice, oneOff, parallelToolCalls }
+  ) {
     const { list, nameMap } = this.#prepareTools(tools);
     const schema = toSchema(list);
     const r = await this.#call(
@@ -194,15 +212,29 @@ export class ChatAssistant {
         tools: schema,
         instructions,
         tool_choice: toolChoice,
+        parallel_tool_calls: parallelToolCalls !== false,
       },
       !oneOff
     );
-    const out = await this.#handle(r, list, instructions, !oneOff);
-    if (out.name) out.name = nameMap.get(out.name) || out.name;
+    const out = await this.#handle(
+      r,
+      list,
+      instructions,
+      !oneOff,
+      parallelToolCalls !== false
+    );
+    if (out.calls && out.calls.length) {
+      out.calls = out.calls.map((c) => ({
+        ...c,
+        name: nameMap.get(c.name) || c.name,
+      }));
+    }
     return out;
   }
-
-  async choice(prompt, { kind = "yesno", tools, instructions, oneOff } = {}) {
+  async choice(
+    prompt,
+    { kind = "yesno", tools, instructions, oneOff, parallelToolCalls } = {}
+  ) {
     const base =
       tools && tools.length
         ? toolsJson(tools)
@@ -212,10 +244,13 @@ export class ChatAssistant {
       instructions: instructions ?? defaultInstruction(kind),
       toolChoice: "required",
       oneOff,
+      parallelToolCalls,
     });
   }
-
-  async chat(prompt, { tools, force, instructions, oneOff } = {}) {
+  async chat(
+    prompt,
+    { tools, force, instructions, oneOff, parallelToolCalls } = {}
+  ) {
     const selected = tools === undefined ? undefined : toolsJson(tools);
     const toolChoice =
       force === true ? "required" : force === false ? "none" : "auto";
@@ -224,6 +259,7 @@ export class ChatAssistant {
       instructions: instructions ?? this.inst,
       toolChoice,
       oneOff,
+      parallelToolCalls,
     });
   }
 
